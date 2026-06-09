@@ -1,0 +1,10 @@
+app_name: nginx-demo
+namespace: default
+replicas: 2
+image: nginx:1.26.2
+container_port: 80
+service_port: 80
+node_port: 30080
+labels:
+  app: nginx-demo
+
