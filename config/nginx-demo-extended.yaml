@@ -1,0 +1,15 @@
+app_name: nginx-demo-cm
+namespace: default
+replicas: 1
+image: nginx:1.26.2
+container_port: 80
+service_port: 80
+node_port: 30095
+labels:
+  app: nginx-demo-cm
+configmap_name: nginx-demo-config
+configmap_data:
+  welcome_message: "Hello from ConfigMap!"
+  log_level: "info"
+ingress_host: nginx-demo-cm.local
+ingress_path: /

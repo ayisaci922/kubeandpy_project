@@ -23,6 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
     delete_parser = subparsers.add_parser("delete", help="Delete Deployment and Service")
     delete_parser.add_argument("--config", required=True, help="Path to YAML config file")
 
+    cm_parser = subparsers.add_parser("configmap", help="Create configmap only")
+    cm_parser.add_argument("--config", required=True, help="Path to YAML config file")
+
+    ing_parser = subparsers.add_parser("ingress", help="Create ingress only")
+    ing_parser.add_argument("--config", required=True, help="Path to YAML config file")
     return parser
 
 
@@ -41,6 +46,11 @@ def run_with_config(app_config: AppConfig, command: str, image: str | None = Non
     if command == "delete":
         deployer.delete()
         return
+    if command == "configmap":
+        deployer.create_configmap()
+
+    if command == "ingress":
+        deployer.create_ingress()
     raise ValueError(f"Unsupported command: {command}")
 
 

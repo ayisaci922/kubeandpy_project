@@ -7,3 +7,7 @@ venv/
 .test/
 .env
 study/
+study_test/
+study_test_demo1/
+study-k8s-python/
+study2/

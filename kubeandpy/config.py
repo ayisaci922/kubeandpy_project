@@ -17,6 +17,10 @@ class AppConfig:
     service_port: int = 80
     node_port: int = 30080
     labels: Dict[str, str] = field(default_factory=dict)
+    configmap_name: str = ""
+    configmap_data: Dict[str, str] = field(default_factory=dict)
+    ingress_host: str = ""
+    ingress_path: str = "/"
 
     @property
     def selector(self) -> str:
@@ -58,5 +62,9 @@ def load_config(config_path: str | Path) -> AppConfig:
         service_port=data.get("service_port", 80),
         node_port=data.get("node_port", 30080),
         labels=labels,
+        configmap_name=data.get("configmap_name", ""),
+        configmap_data=data.get("configmap_data", {}),
+        ingress_host=data.get("ingress_host", ""),
+        ingress_path=data.get("ingress_path", "/")
     )
 

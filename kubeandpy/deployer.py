@@ -28,6 +28,10 @@ class KubernetesDeployer:
         self._apply_service(service)
         self.wait_for_pods_ready()
         self._print_access_url()
+        if self.app_config.configmap_name:
+            self.create_configmap()
+        if self.app_config.ingress_host:
+            self.create_ingress()
 
     def update_image(self, new_image: str) -> None:
         patch_body = {
@@ -60,8 +64,15 @@ class KubernetesDeployer:
         for resource_name, deleter in (
             ("Deployment", self.apps_api.delete_namespaced_deployment),
             ("Service", self.core_api.delete_namespaced_service),
+            ("ConfigMap", self.core_api.delete_namespaced_config_map),
+            ("Ingress", self._delete_ingress)
         ):
             try:
+                if resource_name == "Ingress":
+                    deleter()
+                    print(f"[INFO] Deleted Ingress: {self.app_config.app_name}")
+                    continue
+
                 deleter(
                     name=self.app_config.app_name,
                     namespace=self.app_config.namespace,
@@ -202,6 +213,101 @@ class KubernetesDeployer:
             metadata=client.V1ObjectMeta(name=self.app_config.app_name, labels=labels),
             spec=spec,
         )
+    
+    def create_configmap(self) -> None:
+    # 创建configmap,把键值对注入到k8s集群
+        name = self.app_config.configmap_name or self.app_config.app_name
+        print(f"[INFO] Creating ConfigMap: {name}")
+        cm = client.V1ConfigMap(
+            api_version="v1",
+            kind="ConfigMap",
+            metadata=client.V1ObjectMeta(
+                name=name, labels=self.app_config.labels
+            ),
+            data=self.app_config.configmap_data
+        )
+        try:
+            self.core_api.read_namespaced_config_map(
+                name=name, namespace=self.app_config.namespace
+            )
+            self.core_api.patch_namespaced_config_map(
+                name=name, namespace=self.app_config.namespace, body=cm
+            )
+            print(f"[INFO] Updated existig Configmap: {name}")
+
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+            self.core_api.create_namespaced_config_map(
+                namespace=self.app_config.namespace, body=cm
+            )
+            print(f"[info] create configmap: {name}")
+    def create_ingress(self) -> None:
+        # 创建ingress, 将域名路由到service.
+        name = self.app_config.app_name
+        print(f"[info] Creating Ingress: {name} ({self.app_config.ingress_host})")
+        ingress = client.V1Ingress(
+            api_version="networking.k8s.io/v1",
+            kind="Ingress",
+            metadata=client.V1ObjectMeta(
+                name=name, labels=self.app_config.labels
+            ),
+            spec=client.V1IngressSpec(
+                rules=[client.V1IngressRule(
+                    host=self.app_config.ingress_host,
+                    http=client.V1HTTPIngressRuleValue(
+                        paths=[client.V1HTTPIngressPath(
+                            path=self.app_config.ingress_path,
+                            path_type="Prefix",
+                            backend=client.V1IngressBackend(
+                                service=client.V1IngressServiceBackend(
+                                    name=name,
+                                    port=client.V1ServiceBackendPort(
+                                        number=self.app_config.container_port
+                                    )
+                                )
+                            )
+                        )]
+                    )
+                )]
+            )
+        )
+
+        try:
+            self._networking_api().read_namespaced_ingress(
+                name=name, namespace=self.app_config.namespace
+            )
+            self._networking_api().patch_namespaced_ingress(
+                name=name, namespace=self.app_config.namespace, body=ingress
+            )
+            print(f"uodated existing ingress {name}")
+
+
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+            self._networking_api().create_namespaced_ingress(
+                namespace=self.app_config.namespace, body=ingress
+            )
+            print(f"[info] created ingress: {name}")
+
+
+    def _networking_api(self) -> client.NetworkingV1Api:
+        # yanchichuangjiannerworkingapi()
+        return client.NetworkingV1Api()
+    
+    def _delete_ingress(self) -> None:
+        try:
+            self._networking_api().delete_namespaced_ingress(
+                name=self.app_config.app_name,
+                namespace=self.app_config.namespace,
+            )
+        except ApiException as exc:
+            if exc.status == 404:
+                return
+            raise
+
+
 
     def _list_pods(self) -> Iterable[client.V1Pod]:
         response = self.core_api.list_namespaced_pod(
@@ -219,15 +325,36 @@ class KubernetesDeployer:
         return any(condition.type == "Ready" and condition.status == "True" for condition in conditions)
 
     def _print_access_url(self) -> None:
+        # try:
+        #     minikube_ip = subprocess.check_output(
+        #         ["minikube", "ip"],
+        #         text=True,
+        #         timeout=15,
+        #     ).strip()
+        #     print(f"[INFO] Application is available at http://{minikube_ip}:{self.app_config.node_port}")
+        # except (FileNotFoundError, subprocess.SubprocessError):
+        #     print(
+        #         "[WARN] Could not resolve Minikube IP automatically. "
+        #         f"Use NodePort {self.app_config.node_port} to access the app."
+        #     )
+        import os
+        # 优先从环境变量获取Minikube ip
+        env_ip = os.environ.get("MINIKUBE_IP")
+        if env_ip:
+            url = f"http://{env_ip}:{self.app_config.node_port}"
+            print(f"[INFO]应用已部署, 访问地址:{url}")
+            return
+        
+        # 否则调用minikube ip 命令
         try:
-            minikube_ip = subprocess.check_output(
+            result = subprocess.run(
                 ["minikube", "ip"],
-                text=True,
-                timeout=15,
-            ).strip()
-            print(f"[INFO] Application is available at http://{minikube_ip}:{self.app_config.node_port}")
-        except (FileNotFoundError, subprocess.SubprocessError):
-            print(
-                "[WARN] Could not resolve Minikube IP automatically. "
-                f"Use NodePort {self.app_config.node_port} to access the app."
+                capture_output=True, text=True,
+                check=True,
             )
+            minikube_ip = result.stdout.strip()
+            url = f"http://{minikube_ip}:{self.app_config.node_port}"
+            print(f"应用已部署, 访问地址:{url}")
+
+        except subprocess.CalledProcessError:
+            print("无法获取minikube ip，请确保minikube正在运行")
